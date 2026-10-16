@@ -141,3 +141,61 @@ class QuestionResultsViewTests(TestCase):
         url = reverse('polls:results', args=(past_question.id,))
         response = self.client.get(url)
         self.assertContains(response, past_question.question_text)
+
+
+class VoteViewTests(TestCase):
+    def setUp(self):
+        self.question = create_question(question_text="Vote question.", days=-1)
+        self.choice1 = self.question.choice_set.create(choice_text="Choice 1")
+        self.choice2 = self.question.choice_set.create(choice_text="Choice 2")
+        self.url = reverse('polls:vote', args=(self.question.id,))
+
+    def test_vote_increments_selected_choice(self):
+        """
+        Voting for a choice increments only that choice and redirects
+        to the results page.
+        """
+        response = self.client.post(self.url, {'choice': self.choice1.id})
+        self.assertRedirects(
+            response, reverse('polls:results', args=(self.question.id,))
+        )
+        self.choice1.refresh_from_db()
+        self.choice2.refresh_from_db()
+        self.assertEqual(self.choice1.votes, 1)
+        self.assertEqual(self.choice2.votes, 0)
+
+    def test_vote_with_missing_choice_does_not_increment(self):
+        """
+        Submitting without a choice redisplays the form with an error
+        and changes no vote counts.
+        """
+        response = self.client.post(self.url, {})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context['error_message'], "You didn't select a choice."
+        )
+        self.choice1.refresh_from_db()
+        self.choice2.refresh_from_db()
+        self.assertEqual(self.choice1.votes, 0)
+        self.assertEqual(self.choice2.votes, 0)
+
+    def test_vote_with_nonexistent_choice_does_not_increment(self):
+        """
+        Submitting a choice id that doesn't exist changes no vote counts.
+        """
+        response = self.client.post(self.url, {'choice': 9999})
+        self.assertEqual(response.status_code, 200)
+        self.choice1.refresh_from_db()
+        self.assertEqual(self.choice1.votes, 0)
+
+    def test_vote_with_other_questions_choice_does_not_increment(self):
+        """
+        Submitting a choice that belongs to a different question changes
+        no vote counts.
+        """
+        other_question = create_question(question_text="Other question.", days=-1)
+        other_choice = other_question.choice_set.create(choice_text="Other")
+        response = self.client.post(self.url, {'choice': other_choice.id})
+        self.assertEqual(response.status_code, 200)
+        other_choice.refresh_from_db()
+        self.assertEqual(other_choice.votes, 0)
